@@ -1,7 +1,8 @@
 -- Filter dropdowns (multi-select) in the leads section of the Antiquities journal:
 -- - Type: kind of reward (furnishing, treasure, style page, mount, mythic item, ...)
 -- - Found status: not found yet / already found (recovered at least once)
--- - Difficulty: the 5 scrying difficulties (Simple ... Ultimate) shown on each lead tile
+-- - Difficulty: the 5 scrying difficulties (Simple ... Ultimate) shown on each lead tile,
+--   plus a "Scryable" option that only shows leads the character's scrying skill allows
 
 AntiquityLeadFilter = AntiquityLeadFilter or {}
 local ALF = AntiquityLeadFilter
@@ -15,6 +16,7 @@ local defaults = {
     hiddenDifficulties = {},   -- [difficulty] = true  -> hide this difficulty
     hiddenFoundStates = {},    -- [foundState] = true  -> hide this found state
     hiddenTypes = {},          -- [typeKey] = true     -> hide this antiquity type
+    onlyScryable = false,      -- true -> only leads the character can scry with the current skill
 }
 
 local TITLE_OFFSET_X = 40   -- left indent of the journal's category title and section headings
@@ -45,6 +47,11 @@ end
 local function IsDifficultyShown(difficulty)
     -- Difficulty 0 (none) is never filtered
     return difficulty <= 0 or not ALF.sv.hiddenDifficulties[difficulty]
+end
+
+local function IsScryableShown(antiquityData)
+    -- Same check the journal uses for its "Requires skill" sections
+    return not ALF.sv.onlyScryable or antiquityData:MeetsScryingSkillRequirements()
 end
 
 local function IsFoundStateShown(antiquityData)
@@ -117,6 +124,7 @@ end
 
 local function IsAntiquityShown(antiquityData)
     return IsDifficultyShown(antiquityData:GetDifficulty())
+        and IsScryableShown(antiquityData)
         and IsFoundStateShown(antiquityData)
         and IsTypeShown(antiquityData)
 end
@@ -166,7 +174,9 @@ end
 -- items: list of { key, label, text }  (label = colored entry text, text = plain name for the summary)
 -- hiddenTable: saved variables table, [key] = true for deselected items
 -- texts: { none, all, count } summary texts (count is optional)
-local function CreateMultiSelectDropdown(name, parent, width, items, hiddenTable, texts)
+-- option: optional extra entry shown first, stored separately and not part of the summary count:
+--         { text, getValue(), setValue(isSelected) }
+local function CreateMultiSelectDropdown(name, parent, width, items, hiddenTable, texts, option)
     local control = CreateControlFromVirtual(name, parent, "ZO_ComboBox")
     control:SetDimensions(width, 31)
     control:SetHidden(true)
@@ -177,29 +187,58 @@ local function CreateMultiSelectDropdown(name, parent, width, items, hiddenTable
     comboBox:SetSpacing(4)
     comboBox:EnableMultiSelect()
 
-    -- Custom display text: "All", individual names or a count
+    -- Custom display text: "All", individual names or a count; the option is put in front
     local numItems = #items
     function comboBox:RefreshSelectedItemText()
-        local selected = self:GetSelectedItemData()
+        local selected = {}
+        local isOptionSelected = false
+        for _, entry in ipairs(self:GetSelectedItemData()) do
+            if entry.isOption then
+                isOptionSelected = true
+            else
+                selected[#selected + 1] = entry
+            end
+        end
+
         local numSelected = #selected
+        local text
         if numSelected == 0 then
-            self:SetSelectedItemText(texts.none)
+            text = texts.none
         elseif numSelected == numItems then
-            self:SetSelectedItemText(texts.all)
+            text = texts.all
         elseif numSelected <= 2 or not texts.count then
             local names = {}
             for i, entry in ipairs(selected) do
                 names[i] = entry.plainText
             end
-            self:SetSelectedItemText(table.concat(names, ", "))
+            text = table.concat(names, ", ")
         else
-            self:SetSelectedItemText(zo_strformat(texts.count, numSelected))
+            text = zo_strformat(texts.count, numSelected)
         end
+
+        if isOptionSelected then
+            text = numSelected == numItems and option.text or (option.text .. ", " .. text)
+        end
+        self:SetSelectedItemText(text)
     end
 
     local function OnEntryToggled(_, _, entry)
-        hiddenTable[entry.key] = (not comboBox:IsItemSelected(entry)) or nil
+        local isSelected = comboBox:IsItemSelected(entry)
+        if entry.isOption then
+            option.setValue(isSelected)
+        else
+            hiddenTable[entry.key] = (not isSelected) or nil
+        end
         RefreshJournal()
+    end
+
+    if option then
+        local entry = comboBox:CreateItemEntry(option.text, OnEntryToggled)
+        entry.isOption = true
+        comboBox:AddItem(entry)
+        if option.getValue() then
+            comboBox:AddItemToSelected(entry)
+        end
     end
 
     for _, item in ipairs(items) do
@@ -228,9 +267,17 @@ function ALF:CreateDropdowns()
         local color = colors[difficulty] or ZO_SELECTED_TEXT
         difficultyItems[#difficultyItems + 1] = { key = difficulty, label = color:Colorize(difficultyName), text = difficultyName }
     end
+    local sv = self.sv
+    local scryableOption = {
+        -- "Scryable": the game's own name of the leads category in the journal
+        text = zo_strformat("<<C:1>>", GetString(SI_ANTIQUITY_SCRYABLE)),
+        getValue = function() return sv.onlyScryable end,
+        setValue = function(isSelected) sv.onlyScryable = isSelected end,
+    }
     local difficultyDropdown = CreateMultiSelectDropdown("AntiquityLeadFilterDifficultyDropdown", categoryInset, DROPDOWN_FALLBACK_WIDTH,
-        difficultyItems, self.sv.hiddenDifficulties,
-        { none = L.NO_SELECTION, all = L.ALL_SELECTED, count = L.NUM_SELECTED })
+        difficultyItems, sv.hiddenDifficulties,
+        { none = L.NO_SELECTION, all = L.ALL_SELECTED, count = L.NUM_SELECTED },
+        scryableOption)
 
     -- Found status
     local foundItems = {

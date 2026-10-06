@@ -6,6 +6,7 @@ An addon for The Elder Scrolls Online that adds type, found status and difficult
 
 - Three multi-select dropdowns below the category title in the leads section of the journal
 - Difficulty: filters leads by the five scrying difficulties, from Simple to Ultimate (names from the game, colored by quality)
+- Scryable option in the difficulty filter: only show leads your character can scry with their current scrying skill
 - Type: filter by kind of antiquity, e.g. furnishing, treasure, style page, mount or mythic item (names from the game)
 - Found status: show leads for antiquities you have not found yet, have already found, or both
 - The selection is saved account-wide
