@@ -1,14 +1,30 @@
--- Difficulty dropdown (multi-select) in the leads section of the Antiquities journal.
--- Filters by the 5 scrying difficulties (Simple ... Ultimate) shown on each lead tile.
+-- Filter dropdowns (multi-select) in the leads section of the Antiquities journal:
+-- - Type: kind of reward (furnishing, treasure, style page, mount, mythic item, ...)
+-- - Found status: not found yet / already found (recovered at least once)
+-- - Difficulty: the 5 scrying difficulties (Simple ... Ultimate) shown on each lead tile
 
 AntiquityLeadFilter = AntiquityLeadFilter or {}
 local ALF = AntiquityLeadFilter
 
 ALF.name = "AntiquityLeadFilter"
 
+local FOUND_STATE_NOT_FOUND = 1
+local FOUND_STATE_FOUND = 2
+
 local defaults = {
     hiddenDifficulties = {},   -- [difficulty] = true  -> hide this difficulty
+    hiddenFoundStates = {},    -- [foundState] = true  -> hide this found state
+    hiddenTypes = {},          -- [typeKey] = true     -> hide this antiquity type
 }
+
+local TITLE_OFFSET_X = 40   -- left indent of the journal's category title and section headings
+local DROPDOWN_SPACING = 10
+local DROPDOWN_RIGHT_MARGIN = 10
+local DROPDOWN_FALLBACK_WIDTH = 170
+local LIST_OFFSET_Y = 45   -- space between the dropdown row and the lead list
+
+local TYPE_KEY_MYTHIC = "mythic"
+local TYPE_KEY_OTHER = "other"
 
 local L = ALF.L
 
@@ -29,6 +45,80 @@ end
 local function IsDifficultyShown(difficulty)
     -- Difficulty 0 (none) is never filtered
     return difficulty <= 0 or not ALF.sv.hiddenDifficulties[difficulty]
+end
+
+local function IsFoundStateShown(antiquityData)
+    local foundState = antiquityData:HasRecovered() and FOUND_STATE_FOUND or FOUND_STATE_NOT_FOUND
+    return not ALF.sv.hiddenFoundStates[foundState]
+end
+
+-- Type of an antiquity, derived from its reward. Set fragments (e.g. mythic items, mounts)
+-- use the reward of their set. Returns a stable key and a localized name from the game.
+local function GetAntiquityType(antiquityId)
+    local rewardId = 0
+    local setId = GetAntiquitySetId(antiquityId)
+    if setId and setId ~= 0 then
+        rewardId = GetAntiquitySetRewardId(setId)
+    end
+    if not rewardId or rewardId == 0 then
+        rewardId = GetAntiquityRewardId(antiquityId)
+    end
+    if not rewardId or rewardId == 0 then
+        return TYPE_KEY_OTHER, L.TYPE_OTHER
+    end
+
+    local rewardType = GetRewardType(rewardId)
+    if rewardType == REWARD_ENTRY_TYPE_ITEM then
+        local itemLink = GetItemRewardItemLink(rewardId, 1)
+        if GetItemLinkDisplayQuality(itemLink) == ITEM_DISPLAY_QUALITY_MYTHIC_OVERRIDE then
+            return TYPE_KEY_MYTHIC, GetString("SI_ITEMDISPLAYQUALITY", ITEM_DISPLAY_QUALITY_MYTHIC_OVERRIDE)
+        end
+        local itemType = GetItemLinkItemType(itemLink)
+        return "item:" .. itemType, GetString("SI_ITEMTYPE", itemType)
+    elseif rewardType == REWARD_ENTRY_TYPE_COLLECTIBLE then
+        local categoryType = GetCollectibleCategoryType(GetCollectibleRewardCollectibleId(rewardId))
+        return "collectible:" .. categoryType, GetString("SI_COLLECTIBLECATEGORYTYPE", categoryType)
+    end
+    return TYPE_KEY_OTHER, L.TYPE_OTHER
+end
+
+-- Type key per antiquity id and the list of all types present (sorted by name, "Other" last)
+local function CollectAntiquityTypes()
+    local typeByAntiquityId = {}
+    local namesByKey = {}
+    local antiquityId = GetNextAntiquityId()
+    while antiquityId do
+        local key, name = GetAntiquityType(antiquityId)
+        if name == nil or name == "" then
+            key, name = TYPE_KEY_OTHER, L.TYPE_OTHER
+        end
+        typeByAntiquityId[antiquityId] = key
+        namesByKey[key] = zo_strformat("<<C:1>>", name)
+        antiquityId = GetNextAntiquityId(antiquityId)
+    end
+
+    local types = {}
+    for key, name in pairs(namesByKey) do
+        types[#types + 1] = { key = key, name = name }
+    end
+    table.sort(types, function(a, b)
+        if (a.key == TYPE_KEY_OTHER) ~= (b.key == TYPE_KEY_OTHER) then
+            return b.key == TYPE_KEY_OTHER
+        end
+        return a.name < b.name
+    end)
+    return typeByAntiquityId, types
+end
+
+local function IsTypeShown(antiquityData)
+    local key = ALF.typeByAntiquityId[antiquityData:GetId()] or TYPE_KEY_OTHER
+    return not ALF.sv.hiddenTypes[key]
+end
+
+local function IsAntiquityShown(antiquityData)
+    return IsDifficultyShown(antiquityData:GetDifficulty())
+        and IsFoundStateShown(antiquityData)
+        and IsTypeShown(antiquityData)
 end
 
 -- Color per difficulty: the most common antiquity quality color of that difficulty
@@ -69,17 +159,16 @@ local function RefreshJournal()
 end
 
 ---------------------------------------------------------------------------
--- Dropdown
+-- Dropdowns
 ---------------------------------------------------------------------------
 
-function ALF:CreateDropdown()
-    local categoryInset = ZO_AntiquityJournal_Keyboard_TopLevel:GetNamedChild("Contents"):GetNamedChild("Category")
-
-    local control = CreateControlFromVirtual("AntiquityLeadFilterDifficultyDropdown", categoryInset, "ZO_ComboBox")
-    control:SetDimensions(220, 31)
-    -- Below the category title (vertical), right-aligned with the list (horizontal)
-    control:SetAnchor(TOP, categoryInset:GetNamedChild("Title"), BOTTOM, 0, 5, ANCHOR_CONSTRAINS_Y)
-    control:SetAnchor(RIGHT, categoryInset, RIGHT, -10, 0, ANCHOR_CONSTRAINS_X)
+-- Creates a multi-select dropdown.
+-- items: list of { key, label, text }  (label = colored entry text, text = plain name for the summary)
+-- hiddenTable: saved variables table, [key] = true for deselected items
+-- texts: { none, all, count } summary texts (count is optional)
+local function CreateMultiSelectDropdown(name, parent, width, items, hiddenTable, texts)
+    local control = CreateControlFromVirtual(name, parent, "ZO_ComboBox")
+    control:SetDimensions(width, 31)
     control:SetHidden(true)
 
     local comboBox = ZO_ComboBox_ObjectFromContainer(control)
@@ -89,45 +178,104 @@ function ALF:CreateDropdown()
     comboBox:EnableMultiSelect()
 
     -- Custom display text: "All", individual names or a count
-    local numDifficulties = ANTIQUITY_DIFFICULTY_MAX_VALUE
+    local numItems = #items
     function comboBox:RefreshSelectedItemText()
         local selected = self:GetSelectedItemData()
         local numSelected = #selected
         if numSelected == 0 then
-            self:SetSelectedItemText(L.NO_SELECTION)
-        elseif numSelected == numDifficulties then
-            self:SetSelectedItemText(L.ALL_SELECTED)
-        elseif numSelected <= 2 then
+            self:SetSelectedItemText(texts.none)
+        elseif numSelected == numItems then
+            self:SetSelectedItemText(texts.all)
+        elseif numSelected <= 2 or not texts.count then
             local names = {}
             for i, entry in ipairs(selected) do
-                names[i] = entry.difficultyName
+                names[i] = entry.plainText
             end
             self:SetSelectedItemText(table.concat(names, ", "))
         else
-            self:SetSelectedItemText(zo_strformat(L.NUM_SELECTED, numSelected))
+            self:SetSelectedItemText(zo_strformat(texts.count, numSelected))
         end
     end
 
     local function OnEntryToggled(_, _, entry)
-        ALF.sv.hiddenDifficulties[entry.difficulty] = (not comboBox:IsItemSelected(entry)) or nil
+        hiddenTable[entry.key] = (not comboBox:IsItemSelected(entry)) or nil
         RefreshJournal()
     end
 
-    local colors = CollectDifficultyColors()
-    for difficulty = 1, ANTIQUITY_DIFFICULTY_MAX_VALUE do
-        local difficultyName = GetDifficultyName(difficulty)
-        local color = colors[difficulty] or ZO_SELECTED_TEXT
-        local entry = comboBox:CreateItemEntry(color:Colorize(difficultyName), OnEntryToggled)
-        entry.difficulty = difficulty
-        entry.difficultyName = difficultyName
+    for _, item in ipairs(items) do
+        local entry = comboBox:CreateItemEntry(item.label, OnEntryToggled)
+        entry.key = item.key
+        entry.plainText = item.text
         comboBox:AddItem(entry)
-        if IsDifficultyShown(difficulty) then
+        if not hiddenTable[item.key] then
             comboBox:AddItemToSelected(entry)
         end
     end
     comboBox:RefreshSelectedItemText()
 
-    self.dropdown = control
+    return control
+end
+
+function ALF:CreateDropdowns()
+    local categoryInset = ZO_AntiquityJournal_Keyboard_TopLevel:GetNamedChild("Contents"):GetNamedChild("Category")
+    local title = categoryInset:GetNamedChild("Title")
+
+    -- Difficulty
+    local colors = CollectDifficultyColors()
+    local difficultyItems = {}
+    for difficulty = 1, ANTIQUITY_DIFFICULTY_MAX_VALUE do
+        local difficultyName = GetDifficultyName(difficulty)
+        local color = colors[difficulty] or ZO_SELECTED_TEXT
+        difficultyItems[#difficultyItems + 1] = { key = difficulty, label = color:Colorize(difficultyName), text = difficultyName }
+    end
+    local difficultyDropdown = CreateMultiSelectDropdown("AntiquityLeadFilterDifficultyDropdown", categoryInset, DROPDOWN_FALLBACK_WIDTH,
+        difficultyItems, self.sv.hiddenDifficulties,
+        { none = L.NO_SELECTION, all = L.ALL_SELECTED, count = L.NUM_SELECTED })
+
+    -- Found status
+    local foundItems = {
+        { key = FOUND_STATE_NOT_FOUND, label = L.NOT_FOUND, text = L.NOT_FOUND },
+        { key = FOUND_STATE_FOUND,     label = L.FOUND,     text = L.FOUND },
+    }
+    local foundDropdown = CreateMultiSelectDropdown("AntiquityLeadFilterFoundDropdown", categoryInset, DROPDOWN_FALLBACK_WIDTH,
+        foundItems, self.sv.hiddenFoundStates,
+        { none = L.FOUND_NONE, all = L.FOUND_ALL })
+
+    -- Type
+    local typeItems = {}
+    for _, antiquityType in ipairs(self.types) do
+        typeItems[#typeItems + 1] = { key = antiquityType.key, label = antiquityType.name, text = antiquityType.name }
+    end
+    local typeDropdown = CreateMultiSelectDropdown("AntiquityLeadFilterTypeDropdown", categoryInset, DROPDOWN_FALLBACK_WIDTH,
+        typeItems, self.sv.hiddenTypes,
+        { none = L.TYPE_NONE, all = L.TYPE_ALL, count = L.TYPE_COUNT })
+
+    -- Below the category title, from left to right: type, found status, difficulty.
+    -- The row starts flush with the title and section headings; widths are set in LayoutDropdowns.
+    typeDropdown:SetAnchor(TOPLEFT, title, BOTTOMLEFT, 0, 5)
+    foundDropdown:SetAnchor(LEFT, typeDropdown, RIGHT, DROPDOWN_SPACING, 0)
+    difficultyDropdown:SetAnchor(LEFT, foundDropdown, RIGHT, DROPDOWN_SPACING, 0)
+
+    self.categoryInset = categoryInset
+    self.dropdowns = { typeDropdown, foundDropdown, difficultyDropdown }
+end
+
+-- Equal widths so the row spans from the title's left edge to the right edge of the list
+function ALF:LayoutDropdowns()
+    local available = self.categoryInset:GetWidth() - TITLE_OFFSET_X - DROPDOWN_RIGHT_MARGIN
+    local width = (available - DROPDOWN_SPACING * (#self.dropdowns - 1)) / #self.dropdowns
+    if width <= 0 then
+        width = DROPDOWN_FALLBACK_WIDTH
+    end
+    for _, dropdown in ipairs(self.dropdowns) do
+        dropdown:SetWidth(width)
+    end
+end
+
+function ALF:SetDropdownsHidden(hidden)
+    for _, dropdown in ipairs(self.dropdowns) do
+        dropdown:SetHidden(hidden)
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -137,12 +285,12 @@ end
 function ALF:HookJournal()
     local Journal = ZO_AntiquityJournal_Keyboard
 
-    -- 1) Filter lead tiles by difficulty. Empty sections get no heading.
+    -- 1) Filter lead tiles. Empty sections get no heading.
     local originalAddScryableTiles = Journal.AddScryableAntiquityTiles
     Journal.AddScryableAntiquityTiles = function(journal, previousTileOrHeading, headingText, antiquities, sortFunction)
         local filtered = {}
         for _, antiquityData in ipairs(antiquities) do
-            if IsDifficultyShown(antiquityData:GetDifficulty()) then
+            if IsAntiquityShown(antiquityData) then
                 filtered[#filtered + 1] = antiquityData
             end
         end
@@ -152,18 +300,20 @@ function ALF:HookJournal()
         return originalAddScryableTiles(journal, previousTileOrHeading, headingText, filtered, sortFunction)
     end
 
-    -- 2) Show the dropdown only in the leads section; show "list empty" when everything is filtered out
+    -- 2) Show the dropdowns only in the leads section; show "list empty" when everything is filtered out
     local originalBuildTiles = Journal.BuildCategoryAntiquityTiles
     Journal.BuildCategoryAntiquityTiles = function(journal, categoryData, ...)
         originalBuildTiles(journal, categoryData, ...)
 
         local isScryable = ZO_IsAntiquityScryableSubcategory(categoryData)
-        ALF.dropdown:SetHidden(not isScryable)
+        ALF:SetDropdownsHidden(not isScryable)
 
         if isScryable then
-            -- Move the list below the dropdown (the game anchors it higher in this section)
+            ALF:LayoutDropdowns()
+
+            -- Move the list below the dropdowns (the game anchors it higher in this section)
             journal.contentList:ClearAnchors()
-            journal.contentList:SetAnchor(TOPLEFT, journal.categoryInset, BOTTOMLEFT, 0, 35)
+            journal.contentList:SetAnchor(TOPLEFT, journal.categoryInset, BOTTOMLEFT, 0, LIST_OFFSET_Y)
             journal.contentList:SetAnchor(BOTTOMRIGHT, nil, nil, -10, -75)
         end
 
@@ -173,9 +323,9 @@ function ALF:HookJournal()
         end
     end
 
-    -- 3) Locked content: hide the dropdown
+    -- 3) Locked content: hide the dropdowns
     ZO_PostHook(Journal, "ShowLockedContentPanel", function()
-        ALF.dropdown:SetHidden(true)
+        ALF:SetDropdownsHidden(true)
     end)
 end
 
@@ -190,7 +340,8 @@ local function OnAddOnLoaded(_, addOnName)
     if not (ZO_AntiquityJournal_Keyboard and ZO_AntiquityJournal_Keyboard_TopLevel) then return end
 
     ALF.sv = ZO_SavedVars:NewAccountWide("AntiquityLeadFilter_SV", 1, nil, defaults)
-    ALF:CreateDropdown()
+    ALF.typeByAntiquityId, ALF.types = CollectAntiquityTypes()
+    ALF:CreateDropdowns()
     ALF:HookJournal()
 end
 

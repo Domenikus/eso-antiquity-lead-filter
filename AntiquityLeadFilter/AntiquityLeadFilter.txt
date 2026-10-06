@@ -1,8 +1,8 @@
 ## Title: Antiquity Lead Filter
-## Description: Adds a difficulty filter dropdown to the leads section of the Antiquities journal.
+## Description: Adds type, found status and difficulty filters to the leads section of the Antiquities journal.
 ## Author: Domenikus
-## Version: 3.0.2
-## AddOnVersion: 11
+## Version: 3.2.1
+## AddOnVersion: 14
 ## APIVersion: 101047 101048
 ## SavedVariables: AntiquityLeadFilter_SV
 

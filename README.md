@@ -1,12 +1,13 @@
 # Antiquity Lead Filter
 
-An addon for The Elder Scrolls Online that adds a difficulty filter to the leads section of the Antiquities journal.
+An addon for The Elder Scrolls Online that adds type, found status and difficulty filters to the leads section of the Antiquities journal.
 
 ## Features
 
-- Multi-select dropdown below the category title in the leads section of the journal
-- Filters leads by the five scrying difficulties, from Simple to Ultimate
-- Difficulty names come from the game and are colored by quality
+- Three multi-select dropdowns below the category title in the leads section of the journal
+- Difficulty: filters leads by the five scrying difficulties, from Simple to Ultimate (names from the game, colored by quality)
+- Type: filter by kind of antiquity, e.g. furnishing, treasure, style page, mount or mythic item (names from the game)
+- Found status: show leads for antiquities you have not found yet, have already found, or both
 - The selection is saved account-wide
 - Works in all ESO client languages (EN, DE, FR, ES, RU, JP, ZH)
 
@@ -21,7 +22,7 @@ Keep the folder name `AntiquityLeadFilter`: ESO only loads an addon whose folder
 
 ## Usage
 
-Open the Antiquities journal (keyboard UI), go to the leads section and select the difficulties you want to see in the dropdown.
+Open the Antiquities journal (keyboard UI), go to the leads section and pick the types, found status and difficulties you want to see in the dropdowns.
 
 ## License
 
