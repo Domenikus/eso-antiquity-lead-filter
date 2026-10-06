@@ -12,12 +12,12 @@ An addon for The Elder Scrolls Online that adds a difficulty filter to the leads
 
 ## Installation
 
-1. Copy the contents of `src/` into a folder named `AntiquityLeadFilter` in your AddOns directory:
-   - Windows: `Documents\Elder Scrolls Online\live\AddOns\AntiquityLeadFilter`
-   - macOS: `~/Documents/Elder Scrolls Online/live/AddOns/AntiquityLeadFilter`
+1. Copy the `AntiquityLeadFilter` folder into your AddOns directory:
+   - Windows: `Documents\Elder Scrolls Online\live\AddOns\`
+   - macOS: `~/Documents/Elder Scrolls Online/live/AddOns/`
 2. Enable the addon in the in-game AddOns menu, or type `/reloadui`.
 
-The folder name must be `AntiquityLeadFilter`, otherwise ESO will not load the addon.
+Keep the folder name `AntiquityLeadFilter`: ESO only loads an addon whose folder name matches its manifest file.
 
 ## Usage
 
