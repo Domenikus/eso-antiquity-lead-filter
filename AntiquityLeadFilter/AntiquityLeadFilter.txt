@@ -3,7 +3,7 @@
 ## Author: Domenikus
 ## Version: 3.3.0
 ## AddOnVersion: 15
-## APIVersion: 101047 101048
+## APIVersion: 101051 101052
 ## SavedVariables: AntiquityLeadFilter_SV
 
 Localization.lua
